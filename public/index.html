@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Smart Library Cloud</title>
+
+<style>
+body{margin:0;font-family:Arial;background:#f4f4f4}
+
+/* HEADER */
+header{
+    background:#4a6fa5;color:white;
+    padding:10px 15px;
+    display:flex;align-items:center;
+    justify-content:space-between;
+}
+.actions{display:flex;gap:10px}
+.actions button{
+    border:none;padding:8px 12px;
+    border-radius:6px;cursor:pointer;
+}
+
+/* SEARCH */
+#searchBox{padding:10px;display:none;background:#fff}
+#searchBox input{width:100%;padding:8px}
+
+/* GRID */
+.grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+    gap:15px;padding:20px;
+}
+.card{
+    background:white;padding:10px;border-radius:10px;
+    text-align:center;position:relative;
+}
+.card:hover{transform:scale(1.05);transition:0.2s}
+
+/* CHECKBOX */
+.card input{
+    position:absolute;top:5px;left:5px;
+}
+
+/* VIEWER */
+#viewer{padding:20px}
+iframe{width:100%;height:500px}
+img{max-width:100%;height:400px;object-fit:contain}
+</style>
+</head>
+
+<body>
+
+<header>
+    <h2>📚 Hitesh Smart Library</h2>
+
+    <div class="actions">
+        <button onclick="toggleSearch()">🔍</button>
+        <button onclick="createFolder()">📂+</button>
+        <button onclick="uploadClick()">📤</button>
+        <button onclick="deleteSelected()">🗑</button>
+    </div>
+</header>
+
+<div id="searchBox">
+    <input id="searchInput" placeholder="Search..." oninput="render()">
+</div>
+
+<div id="grid" class="grid"></div>
+<div id="viewer"></div>
+
+<input type="file" id="fileInput" multiple hidden>
+
+<script>
+let items=[];
+let currentFolder=null;
+let selected=new Set();
+
+/* LOAD FROM SERVER */
+async function load(){
+    let res=await fetch("/api/list");
+    items=await res.json();
+    render();
+}
+
+/* RENDER */
+function render(){
+    let q=(searchInput.value||"").toLowerCase();
+
+    let list=items.filter(i=>
+        i.parent===currentFolder &&
+        i.name.toLowerCase().includes(q)
+    );
+
+    grid.innerHTML="";
+
+    if(currentFolder!==null){
+        grid.innerHTML+=`<div class="card" onclick="goBack()">⬅ Back</div>`;
+    }
+
+    list.forEach(i=>{
+        let icon=i.type==="folder"?"📁":"📄";
+
+        grid.innerHTML+=`
+        <div class="card">
+            <input type="checkbox" onchange="toggleSelect(${i.id})">
+            <div onclick="${i.type==='folder'?'openFolder('+i.id+')':'openFile('+i.id+')'}">
+                ${icon}<br>${i.name}
+            </div>
+        </div>`;
+    });
+}
+
+/* SELECT */
+function toggleSelect(id){
+    selected.has(id)?selected.delete(id):selected.add(id);
+}
+
+/* DELETE MULTIPLE */
+async function deleteSelected(){
+    if(!selected.size) return alert("No items selected");
+
+    await fetch("/api/delete",{
+        method:"POST",
+        body:JSON.stringify([...selected])
+    });
+
+    selected.clear();
+    load();
+}
+
+/* FOLDER */
+async function createFolder(){
+    let name=prompt("Folder name:");
+    if(!name) return;
+
+    await fetch("/api/create-folder",{
+        method:"POST",
+        body:JSON.stringify({name,parent:currentFolder})
+    });
+
+    load();
+}
+
+function openFolder(id){
+    currentFolder=id;
+    render();
+}
+
+function goBack(){
+    let f=items.find(i=>i.id===currentFolder);
+    currentFolder=f?f.parent:null;
+    render();
+}
+
+/* FILE UPLOAD */
+fileInput.onchange=async ()=>{
+    let files=fileInput.files;
+
+    for(let f of files){
+        let res=await fetch("/api/upload-url",{
+            method:"POST",
+            body:JSON.stringify({name:f.name})
+        });
+
+        let {url}=await res.json();
+
+        await fetch(url,{
+            method:"PUT",
+            body:f
+        });
+
+        await fetch("/api/save-file",{
+            method:"POST",
+            body:JSON.stringify({
+                name:f.name,
+                url:url.split("?")[0],
+                parent:currentFolder
+            })
+        });
+    }
+
+    load();
+};
+
+function uploadClick(){ fileInput.click(); }
+
+/* VIEW */
+function openFile(id){
+    let f=items.find(x=>x.id===id);
+
+    if(f.url.endsWith(".pdf")){
+        viewer.innerHTML=`<iframe src="${f.url}"></iframe>`;
+    }else{
+        viewer.innerHTML=`<img src="${f.url}">`;
+    }
+}
+
+/* UI */
+function toggleSearch(){
+    searchBox.style.display=
+        searchBox.style.display==="block"?"none":"block";
+}
+
+load();
+</script>
+
+</body>
+</html>
